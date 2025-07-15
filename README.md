@@ -30,7 +30,7 @@ This web-based dashboard allows users to:
 | Phase        | Description                           | Status      |
 |--------------|---------------------------------------|-------------|
 | Phase 1      | Twitter API Integration                | ✅ Completed |
-| Phase 2      | Sentiment Analysis with VADER          | 🔄 In Progress |
-| Phase 3      | Data Visualization (bar/pie charts)    | ⏳ Upcoming  |
+| Phase 2      | Sentiment Analysis with VADER          | ✅ Completed |
+| Phase 3      | Data Visualization (bar/pie charts)    | ✅ Completed  |
 | Phase 4      | Streamlit Dashboard UI                 | ⏳ Upcoming  |
 | Phase 5      | Testing, Polish & Deployment           | ⏳ Upcoming  |
