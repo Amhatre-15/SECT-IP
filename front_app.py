@@ -1,89 +1,71 @@
 import streamlit as st
 import pandas as pd
-import pickle
-import re
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
-import nltk
 import matplotlib.pyplot as plt
 import seaborn as sns
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+@st.cache_data
+def load_dataset():
+    df = pd.read_csv('training.1600000.processed.noemoticon.csv', header=None,
+                     names=['sentiment','id','date','query','user','text'], encoding='latin-1')
+    df = df[['text', 'sentiment']]
+    df['Sentiment'] = df['sentiment'].apply(lambda val: "Positive" if val == 4 else "Negative")
+    df.rename(columns={'text': 'Tweet'}, inplace=True)
+    df = df.sample(500, random_state=42).reset_index(drop=True)  # Sample only 500 for speed
+    return df
 
 @st.cache_resource
-def load_stopwords():
-    nltk.download('stopwords')
-    return stopwords.words('english')
+def get_analyzer():
+    return SentimentIntensityAnalyzer()
 
-@st.cache_resource
-def load_model_and_vectorizer():
-    with open('model.pkl', 'rb') as model_file:
-        model = pickle.load(model_file)
-    with open('vectorizer.pkl', 'rb') as vectorizer_file:
-        vectorizer = pickle.load(vectorizer_file)
-    return model, vectorizer
+def classify_vader(score):
+    if score >= 0.05:
+        return "Positive"
+    elif score <= -0.05:
+        return "Negative"
+    else:
+        return "Neutral"
 
-def preprocess(text, stop_words):
-    text = re.sub('[^a-zA-Z]', ' ', text)
-    text = text.lower().split()
-    text = [word for word in text if word not in stop_words]
-    return ' '.join(text)
-
-def predict_sentiment(texts, model, vectorizer, stop_words):
-    processed = [preprocess(t, stop_words) for t in texts]
-    features = vectorizer.transform(processed)
-    predictions = model.predict(features)
-    return ["Negative" if p == 0 else "Positive" for p in predictions]
-
-def create_card(tweet_text, sentiment):
-    color = "green" if sentiment == "Positive" else "red"
-    card_html = f"""
-    <div style="background-color: {color}; padding: 10px; border-radius: 5px; margin: 10px 0;">
-        <h5 style="color: white;">{sentiment} Sentiment</h5>
-        <p style="color: white;">{tweet_text}</p>
-    </div>
-    """
-    return card_html
-
-def plot_graphs(df):
-    sentiment_counts = df['Sentiment'].value_counts().reset_index()
+def plot_sentiment_distribution(df):
+    sentiment_counts = df['VADER Sentiment'].value_counts().reset_index()
     sentiment_counts.columns = ['Sentiment', 'Count']
-    
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, hue='Sentiment',
-                palette='pastel', legend=False, ax=axes[0])
-    axes[0].set_title('Sentiment Distribution')
-    axes[0].set_xlabel('Sentiment')
-    axes[0].set_ylabel('Number of Tweets')
+    col1, col2 = st.columns(2)
+    with col1:
+        fig1, ax1 = plt.subplots()
+        sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, hue='Sentiment',
+                    palette='pastel', legend=False, ax=ax1)
+        ax1.set_title('VADER Sentiment Bar Chart')
+        st.pyplot(fig1)
 
-    axes[1].pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'],
+    with col2:
+        fig2, ax2 = plt.subplots()
+        ax2.pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'],
                 autopct='%1.1f%%', colors=sns.color_palette('pastel'))
-    axes[1].set_title('Sentiment Breakdown (%)')
-
-    st.pyplot(fig)
+        ax2.set_title('VADER Sentiment Pie Chart')
+        st.pyplot(fig2)
 
 def main():
-    st.title("📊 Twitter Sentiment Analysis (Offline CSV)")
+    st.title("📊 Offline Twitter Sentiment Analysis (VADER + CSV)")
 
-    stop_words = load_stopwords()
-    model, vectorizer = load_model_and_vectorizer()
+    df = load_dataset()
+    analyzer = get_analyzer()
 
-    uploaded_file = st.file_uploader("📁 Upload a CSV file with tweets", type=["csv"])
-    
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        if 'text' not in df.columns:
-            st.error("CSV must have a 'text' column.")
-            return
-        df = df[['text']]
-        df.columns = ['Tweet']
+    df['VADER Score'] = df['Tweet'].apply(lambda x: analyzer.polarity_scores(x)['compound'])
+    df['Tweet Length'] = df['Tweet'].apply(len)
+    df['VADER Sentiment'] = df['VADER Score'].apply(classify_vader)
 
-        df['Sentiment'] = predict_sentiment(df['Tweet'], model, vectorizer, stop_words)
+    st.subheader("Sample Data")
+    st.dataframe(df[['Tweet', 'VADER Score', 'VADER Sentiment']].head(10))
 
-        for i in range(min(5, len(df))):
-            card_html = create_card(df['Tweet'][i], df['Sentiment'][i])
-            st.markdown(card_html, unsafe_allow_html=True)
+    st.subheader("Sentiment Distribution")
+    plot_sentiment_distribution(df)
 
-        plot_graphs(df)
+    st.subheader("Tweet Length vs Sentiment")
+    fig3, ax3 = plt.subplots(figsize=(7, 5))
+    sns.boxplot(x='VADER Sentiment', y='Tweet Length', data=df, palette='pastel')
+    ax3.set_title('Tweet Length by Sentiment')
+    st.pyplot(fig3)
 
 if __name__ == "__main__":
     main()
