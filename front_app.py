@@ -1,21 +1,19 @@
 import streamlit as st
 import pickle
 import re
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 import nltk
-from ntscraper import Nitter
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 
-# 📦 Load NLTK stopwords
 @st.cache_resource
 def load_stopwords():
     nltk.download('stopwords')
     return stopwords.words('english')
 
-# 🔍 Load vectorizer + model
 @st.cache_resource
 def load_model_and_vectorizer():
     with open('model.pkl', 'rb') as model_file:
@@ -24,18 +22,30 @@ def load_model_and_vectorizer():
         vectorizer = pickle.load(vectorizer_file)
     return model, vectorizer
 
-# 🧠 Predict sentiment
 def predict_sentiment(text, model, vectorizer, stop_words):
     text = re.sub('[^a-zA-Z]', ' ', text)
     text = text.lower().split()
     text = [word for word in text if word not in stop_words]
     text = ' '.join(text)
-    text = [text]
-    text = vectorizer.transform(text)
-    sentiment = model.predict(text)
-    return "Negative" if sentiment == 0 else "Positive"
+    transformed = vectorizer.transform([text])
+    result = model.predict(transformed)
+    return "Negative" if result == 0 else "Positive"
 
-# 💬 UI tweet card
+def fetch_tweets_from_user(username, bearer_token, max_results=10):
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    search_url = "https://api.twitter.com/2/tweets/search/recent"
+    query = f"from:{username} lang:en -is:retweet"
+    params = {
+        "query": query,
+        "max_results": max_results,
+        "tweet.fields": "created_at,text"
+    }
+    response = requests.get(search_url, headers=headers, params=params)
+    if response.status_code == 200:
+        return response.json().get("data", [])
+    else:
+        return []
+
 def create_card(tweet_text, sentiment):
     color = "green" if sentiment == "Positive" else "red"
     return f"""
@@ -45,57 +55,69 @@ def create_card(tweet_text, sentiment):
     </div>
     """
 
-# 📊 Graphs (bar + pie)
-def plot_sentiment_charts(df):
-    sentiment_counts = df['Sentiment'].value_counts().reset_index()
-    sentiment_counts.columns = ['Sentiment', 'Count']
-    st.subheader("📊 Sentiment Distribution")
+def generate_charts(df):
+    df["Tweet Length"] = df["Tweet"].apply(len)
+    sentiment_counts = df["Sentiment"].value_counts().reset_index()
+    sentiment_counts.columns = ["Sentiment", "Count"]
 
-    fig1, ax1 = plt.subplots()
-    sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, hue='Sentiment',
-                palette='pastel', legend=False, ax=ax1)
-    ax1.set_title('Sentiment Distribution')
-    st.pyplot(fig1)
+    col1, col2 = st.columns(2)
 
-    fig2, ax2 = plt.subplots()
-    ax2.pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'],
-            autopct='%1.1f%%', colors=sns.color_palette('pastel'))
-    ax2.set_title('Sentiment Breakdown (%)')
-    st.pyplot(fig2)
+    with col1:
+        fig1, ax1 = plt.subplots()
+        sns.barplot(x="Sentiment", y="Count", data=sentiment_counts, hue="Sentiment", palette="pastel", ax=ax1, legend=False)
+        ax1.set_title("Sentiment Distribution")
+        st.pyplot(fig1)
 
-# 🚀 Main app logic
+    with col2:
+        fig2, ax2 = plt.subplots()
+        ax2.pie(sentiment_counts["Count"], labels=sentiment_counts["Sentiment"], autopct="%1.1f%%", colors=sns.color_palette("pastel"))
+        ax2.set_title("Sentiment Breakdown (%)")
+        st.pyplot(fig2)
+
+    st.markdown("---")
+    fig3, ax3 = plt.subplots()
+    sns.boxplot(x='Sentiment', y='Tweet Length', data=df, hue='Sentiment', palette='pastel', ax=ax3, legend=False)
+    ax3.set_title('Tweet Length by Sentiment')
+    st.pyplot(fig3)
+
 def main():
-    st.title("Twitter Sentiment Analysis 🧠")
-
+    st.title("📊 Twitter Sentiment Analysis Dashboard")
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
-    scraper = Nitter(log_level=1)
 
-    option = st.selectbox("Choose an option", ["Input text", "Get tweets from user"])
+    bearer_token = st.text_input("Enter your Twitter Bearer Token", type="password")
+    option = st.selectbox("Choose input method", ["Type your own text", "Analyze Tweets from user"])
 
-    if option == "Input text":
-        text_input = st.text_area("Enter text to analyze sentiment")
+    if option == "Type your own text":
+        text_input = st.text_area("Enter your sentence")
         if st.button("Analyze"):
             sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
             st.success(f"Sentiment: {sentiment}")
-            df = pd.DataFrame({'Sentiment': [sentiment]})
-            plot_sentiment_charts(df)
 
-    elif option == "Get tweets from user":
-        username = st.text_input("Enter Twitter username")
-        if st.button("Fetch Tweets"):
-            tweets_data = scraper.get_tweets(username, mode='user', number=10)
-            if 'tweets' in tweets_data:
-                sentiments = []
-                for tweet in tweets_data['tweets']:
-                    tweet_text = tweet['text']
-                    sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)
-                    sentiments.append({'Tweet': tweet_text, 'Sentiment': sentiment})
-                    st.markdown(create_card(tweet_text, sentiment), unsafe_allow_html=True)
-                df = pd.DataFrame(sentiments)
-                plot_sentiment_charts(df)
-            else:
-                st.error("No tweets found or an error occurred.")
+    elif option == "Analyze Tweets from user":
+        username = st.text_input("Enter Twitter username (without @)")
+        if st.button("Fetch & Analyze"):
+            if not bearer_token:
+                st.error("Please enter your Twitter Bearer Token.")
+                return
+            tweets = fetch_tweets_from_user(username, bearer_token, max_results=50)
+            if not tweets:
+                st.warning("No tweets found or API request failed.")
+                return
+
+            df = pd.DataFrame([{
+                "Tweet": t["text"],
+                "Date": t["created_at"]
+            } for t in tweets])
+
+            df["Sentiment"] = df["Tweet"].apply(lambda t: predict_sentiment(t, model, vectorizer, stop_words))
+
+            for i in range(len(df)):
+                card_html = create_card(df["Tweet"][i], df["Sentiment"][i])
+                st.markdown(card_html, unsafe_allow_html=True)
+
+            st.markdown("---")
+            generate_charts(df)
 
 if __name__ == "__main__":
     main()
