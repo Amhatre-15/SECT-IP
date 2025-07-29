@@ -1,77 +1,62 @@
 import streamlit as st
 import pandas as pd
-import pickle
-import re
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
-import nltk
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-@st.cache_resource
-def load_stopwords():
-    nltk.download('stopwords')
-    return stopwords.words('english')
+# Page title
+st.title("🇮🇳 Indian Topics - Twitter Sentiment Analysis")
 
-@st.cache_resource
-def load_model_and_vectorizer():
-    with open('model.pkl', 'rb') as model_file:
-        model = pickle.load(model_file)
-    with open('vectorizer.pkl', 'rb') as vectorizer_file:
-        vectorizer = pickle.load(vectorizer_file)
-    return model, vectorizer
+# Load the dataset
+uploaded_file = 'indian_topics_test_data_nolabel.csv'
 
-def preprocess(text, stop_words):
-    text = re.sub('[^a-zA-Z]', ' ', text)
-    text = text.lower()
-    text = text.split()
-    text = [word for word in text if word not in stop_words]
-    return ' '.join(text)
+@st.cache_data
+def load_data(file_path):
+    df = pd.read_csv(file_path)
+    df.dropna(inplace=True)
+    return df
 
-def predict_sentiment(text, model, vectorizer):
-    transformed = vectorizer.transform([text])
-    sentiment = model.predict(transformed)
-    return "Negative" if sentiment == 0 else "Positive"
+df = load_data(uploaded_file)
+st.subheader("📄 Sample Tweets")
+st.write(df.head(5))
 
-def main():
-    st.title("📊 CSV-Based Sentiment Analysis")
+# VADER Analyzer
+analyzer = SentimentIntensityAnalyzer()
 
-    stop_words = load_stopwords()
-    model, vectorizer = load_model_and_vectorizer()
+def get_sentiment(text):
+    score = analyzer.polarity_scores(text)['compound']
+    if score >= 0.05:
+        return 'Positive'
+    elif score <= -0.05:
+        return 'Negative'
+    else:
+        return 'Neutral'
 
-    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+# Apply sentiment analysis
+df["Sentiment"] = df["Tweet"].apply(get_sentiment)
 
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            if "Tweet" not in df.columns:
-                st.error("CSV must contain a column named 'Tweet'")
-                return
+# Visualization
+st.subheader("📊 Sentiment Distribution")
 
-            df['Cleaned'] = df['Tweet'].apply(lambda x: preprocess(str(x), stop_words))
-            df['Sentiment'] = df['Cleaned'].apply(lambda x: predict_sentiment(x, model, vectorizer))
+sentiment_counts = df['Sentiment'].value_counts().reset_index()
+sentiment_counts.columns = ['Sentiment', 'Count']
 
-            st.success("Sentiment Analysis Completed")
-            st.dataframe(df[['Tweet', 'Sentiment']])
+col1, col2 = st.columns(2)
 
-            sentiment_counts = df['Sentiment'].value_counts().reset_index()
-            sentiment_counts.columns = ['Sentiment', 'Count']
+with col1:
+    sns.set_style("whitegrid")
+    fig1, ax1 = plt.subplots()
+    sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, hue='Sentiment', palette='pastel', legend=False)
+    ax1.set_title("Sentiment Count")
+    st.pyplot(fig1)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                fig1, ax1 = plt.subplots()
-                sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, palette='pastel', ax=ax1)
-                ax1.set_title("Sentiment Distribution")
-                st.pyplot(fig1)
+with col2:
+    fig2, ax2 = plt.subplots()
+    ax2.pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'],
+            autopct='%1.1f%%', colors=sns.color_palette('pastel'))
+    ax2.set_title("Sentiment Breakdown")
+    st.pyplot(fig2)
 
-            with col2:
-                fig2, ax2 = plt.subplots()
-                ax2.pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'], autopct='%1.1f%%', colors=sns.color_palette('pastel'))
-                ax2.set_title("Sentiment Breakdown (%)")
-                st.pyplot(fig2)
-
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-if __name__ == "__main__":
-    main()
+# Optional: Show full data with sentiments
+st.subheader("🧾 All Tweets with Sentiment")
+st.dataframe(df[['Tweet', 'Sentiment']])
