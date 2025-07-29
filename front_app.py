@@ -1,13 +1,12 @@
 import streamlit as st
+import pandas as pd
 import pickle
 import re
-import requests
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 import nltk
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 @st.cache_resource
 def load_stopwords():
@@ -22,102 +21,69 @@ def load_model_and_vectorizer():
         vectorizer = pickle.load(vectorizer_file)
     return model, vectorizer
 
-def predict_sentiment(text, model, vectorizer, stop_words):
+def preprocess(text, stop_words):
     text = re.sub('[^a-zA-Z]', ' ', text)
     text = text.lower().split()
     text = [word for word in text if word not in stop_words]
-    text = ' '.join(text)
-    transformed = vectorizer.transform([text])
-    result = model.predict(transformed)
-    return "Negative" if result == 0 else "Positive"
+    return ' '.join(text)
 
-def fetch_tweets_from_user(username, bearer_token, max_results=10):
-    headers = {"Authorization": f"Bearer {bearer_token}"}
-    search_url = "https://api.twitter.com/2/tweets/search/recent"
-    query = f"from:{username} lang:en -is:retweet"
-    params = {
-        "query": query,
-        "max_results": max_results,
-        "tweet.fields": "created_at,text"
-    }
-    response = requests.get(search_url, headers=headers, params=params)
-    if response.status_code == 200:
-        return response.json().get("data", [])
-    else:
-        return []
+def predict_sentiment(texts, model, vectorizer, stop_words):
+    processed = [preprocess(t, stop_words) for t in texts]
+    features = vectorizer.transform(processed)
+    predictions = model.predict(features)
+    return ["Negative" if p == 0 else "Positive" for p in predictions]
 
 def create_card(tweet_text, sentiment):
     color = "green" if sentiment == "Positive" else "red"
-    return f"""
+    card_html = f"""
     <div style="background-color: {color}; padding: 10px; border-radius: 5px; margin: 10px 0;">
         <h5 style="color: white;">{sentiment} Sentiment</h5>
         <p style="color: white;">{tweet_text}</p>
     </div>
     """
+    return card_html
 
-def generate_charts(df):
-    df["Tweet Length"] = df["Tweet"].apply(len)
-    sentiment_counts = df["Sentiment"].value_counts().reset_index()
-    sentiment_counts.columns = ["Sentiment", "Count"]
+def plot_graphs(df):
+    sentiment_counts = df['Sentiment'].value_counts().reset_index()
+    sentiment_counts.columns = ['Sentiment', 'Count']
+    
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    col1, col2 = st.columns(2)
+    sns.barplot(x='Sentiment', y='Count', data=sentiment_counts, hue='Sentiment',
+                palette='pastel', legend=False, ax=axes[0])
+    axes[0].set_title('Sentiment Distribution')
+    axes[0].set_xlabel('Sentiment')
+    axes[0].set_ylabel('Number of Tweets')
 
-    with col1:
-        fig1, ax1 = plt.subplots()
-        sns.barplot(x="Sentiment", y="Count", data=sentiment_counts, hue="Sentiment", palette="pastel", ax=ax1, legend=False)
-        ax1.set_title("Sentiment Distribution")
-        st.pyplot(fig1)
+    axes[1].pie(sentiment_counts['Count'], labels=sentiment_counts['Sentiment'],
+                autopct='%1.1f%%', colors=sns.color_palette('pastel'))
+    axes[1].set_title('Sentiment Breakdown (%)')
 
-    with col2:
-        fig2, ax2 = plt.subplots()
-        ax2.pie(sentiment_counts["Count"], labels=sentiment_counts["Sentiment"], autopct="%1.1f%%", colors=sns.color_palette("pastel"))
-        ax2.set_title("Sentiment Breakdown (%)")
-        st.pyplot(fig2)
-
-    st.markdown("---")
-    fig3, ax3 = plt.subplots()
-    sns.boxplot(x='Sentiment', y='Tweet Length', data=df, hue='Sentiment', palette='pastel', ax=ax3, legend=False)
-    ax3.set_title('Tweet Length by Sentiment')
-    st.pyplot(fig3)
+    st.pyplot(fig)
 
 def main():
-    st.title("📊 Twitter Sentiment Analysis Dashboard")
+    st.title("📊 Twitter Sentiment Analysis (Offline CSV)")
+
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
 
-    bearer_token = st.text_input("Enter your Twitter Bearer Token", type="password")
-    option = st.selectbox("Choose input method", ["Type your own text", "Analyze Tweets from user"])
+    uploaded_file = st.file_uploader("📁 Upload a CSV file with tweets", type=["csv"])
+    
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+        if 'text' not in df.columns:
+            st.error("CSV must have a 'text' column.")
+            return
+        df = df[['text']]
+        df.columns = ['Tweet']
 
-    if option == "Type your own text":
-        text_input = st.text_area("Enter your sentence")
-        if st.button("Analyze"):
-            sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
-            st.success(f"Sentiment: {sentiment}")
+        df['Sentiment'] = predict_sentiment(df['Tweet'], model, vectorizer, stop_words)
 
-    elif option == "Analyze Tweets from user":
-        username = st.text_input("Enter Twitter username (without @)")
-        if st.button("Fetch & Analyze"):
-            if not bearer_token:
-                st.error("Please enter your Twitter Bearer Token.")
-                return
-            tweets = fetch_tweets_from_user(username, bearer_token, max_results=50)
-            if not tweets:
-                st.warning("No tweets found or API request failed.")
-                return
+        for i in range(min(5, len(df))):
+            card_html = create_card(df['Tweet'][i], df['Sentiment'][i])
+            st.markdown(card_html, unsafe_allow_html=True)
 
-            df = pd.DataFrame([{
-                "Tweet": t["text"],
-                "Date": t["created_at"]
-            } for t in tweets])
-
-            df["Sentiment"] = df["Tweet"].apply(lambda t: predict_sentiment(t, model, vectorizer, stop_words))
-
-            for i in range(len(df)):
-                card_html = create_card(df["Tweet"][i], df["Sentiment"][i])
-                st.markdown(card_html, unsafe_allow_html=True)
-
-            st.markdown("---")
-            generate_charts(df)
+        plot_graphs(df)
 
 if __name__ == "__main__":
     main()
