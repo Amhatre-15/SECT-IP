@@ -23,7 +23,7 @@ This web-based dashboard allows users to:
 | 👨‍💻 Languages     | Python                                       |
 | 📊 Data & ML    | `pandas`, `vaderSentiment`, `matplotlib`    |
 | 🌐 API          | Twitter API v2 via `requests`               |
-| 💻 Framework    | Streamlit *(to be implemented)*             |
+| 💻 Framework    | Streamlit              |
 
 ## ✅ Current Progress
 
@@ -32,5 +32,5 @@ This web-based dashboard allows users to:
 | Phase 1      | Twitter API Integration                | ✅ Completed |
 | Phase 2      | Sentiment Analysis with VADER          | ✅ Completed |
 | Phase 3      | Data Visualization (bar/pie charts)    | ✅ Completed  |
-| Phase 4      | Streamlit Dashboard UI                 | ⏳ Upcoming  |
+| Phase 4      | Streamlit Dashboard UI                 | ✅ Completed  |
 | Phase 5      | Testing, Polish & Deployment           | ⏳ Upcoming  |
