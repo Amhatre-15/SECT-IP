@@ -1,119 +1,94 @@
 import streamlit as st
-import pickle
-import re
 import requests
+import joblib
+import re
+import nltk
 import os
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-# ====== Load Bearer Token Securely ======
-BEARER_TOKEN = st.secrets.get("BEARER_TOKEN", None)
+nltk.download('stopwords')
+nltk.download('wordnet')
 
-if not BEARER_TOKEN:
-    st.error("Twitter Bearer Token is missing. Add it to Streamlit Secrets.")
-    st.stop()
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
 
-# ====== Load Stopwords ======
-@st.cache_resource
-def load_stopwords():
-    return set([
-        'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
-        'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him',
-        'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its',
-        'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what',
-        'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am',
-        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has',
-        'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the',
-        'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of',
-        'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
-        'through', 'during', 'before', 'after', 'above', 'below', 'to',
-        'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under',
-        'again', 'further', 'then', 'once', 'here', 'there', 'when',
-        'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more',
-        'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
-        'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will',
-        'just', 'don', 'should', 'now'
-    ])
+# Load the trained model and vectorizer
+model = joblib.load("model.pkl")
+vectorizer = joblib.load("vectorizer.pkl")
 
-# ====== Load Model & Vectorizer ======
-@st.cache_resource
-def load_model_and_vectorizer():
-    with open('model.pkl', 'rb') as model_file:
-        model = pickle.load(model_file)
-    with open('vectorizer.pkl', 'rb') as vectorizer_file:
-        vectorizer = pickle.load(vectorizer_file)
-    return model, vectorizer
+# Bearer Token - Use Streamlit secrets in production
+BEARER_TOKEN = os.getenv("BEARER_TOKEN") or "YOUR_BEARER_TOKEN_HERE"
 
-# ====== Predict Sentiment ======
+# Text cleaning and preprocessing
+def preprocess_text(text):
+    text = re.sub(r'http\S+', '', text)
+    text = re.sub(r'[^a-zA-Z\s]', '', text)
+    text = text.lower()
+    words = text.split()
+    words = [lemmatizer.lemmatize(word) for word in words if word not in stop_words]
+    return ' '.join(words)
+
+# Predict sentiment
 def predict_sentiment(text, model, vectorizer, stop_words):
-    text = re.sub('[^a-zA-Z]', ' ', text)
-    text = text.lower().split()
-    text = [word for word in text if word not in stop_words]
-    text = ' '.join(text)
-    text_vector = vectorizer.transform([text])
-    sentiment = model.predict(text_vector)
-    return "Negative" if sentiment == 0 else "Positive"
+    clean_text = preprocess_text(text)
+    vectorized_text = vectorizer.transform([clean_text])
+    prediction = model.predict(vectorized_text)[0]
+    return prediction
 
-# ====== Fetch Tweets using Twitter API ======
-def fetch_user_tweets(username, max_results=5):
-    url = f"https://api.twitter.com/2/tweets/search/recent"
+# Create a colored card for sentiment
+def create_card(tweet_text, sentiment):
+    color = {
+        "positive": "#d4edda",
+        "negative": "#f8d7da",
+        "neutral": "#fff3cd"
+    }.get(sentiment, "#e2e3e5")
+
+    return f"""
+    <div style='background-color: {color}; padding: 10px; margin: 10px 0; border-radius: 10px;'>
+        <strong>{sentiment.upper()}</strong><br>{tweet_text}
+    </div>
+    """
+
+# Fetch tweets by topic
+def fetch_topic_tweets(topic, max_results=5):
+    url = "https://api.twitter.com/2/tweets/search/recent"
     headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
     params = {
-        "query": f"from:{username} -is:retweet",
+        "query": f"{topic} -is:retweet lang:en",
         "tweet.fields": "created_at",
         "max_results": max_results
     }
     response = requests.get(url, headers=headers, params=params)
-
     if response.status_code == 200:
         return response.json().get("data", [])
     else:
         st.error(f"Error fetching tweets: {response.status_code}")
         return []
 
-# ====== Display Colored Card ======
-def create_card(tweet_text, sentiment):
-    color = "green" if sentiment == "Positive" else "red"
-    card_html = f"""
-    <div style="background-color: {color}; padding: 10px; border-radius: 5px; margin: 10px 0;">
-        <h5 style="color: white;">{sentiment} Sentiment</h5>
-        <p style="color: white;">{tweet_text}</p>
-    </div>
-    """
-    return card_html
+# Main app
+st.title("Twitter Sentiment Analysis")
+option = st.selectbox("Choose an option", ["Input text", "Get tweets on topic"])
 
-# ====== Streamlit App ======
-def main():
-    st.title("Twitter Sentiment Analysis")
+if option == "Input text":
+    user_input = st.text_area("Enter your text here:")
+    if st.button("Analyze Sentiment"):
+        sentiment = predict_sentiment(user_input, model, vectorizer, stop_words)
+        st.markdown(create_card(user_input, sentiment), unsafe_allow_html=True)
 
-    stop_words = load_stopwords()
-    model, vectorizer = load_model_and_vectorizer()
-
-    option = st.selectbox("Choose an option", ["Input text", "Get tweets from user"])
-    
-    if option == "Input text":
-        text_input = st.text_area("Enter text to analyze sentiment")
-        if st.button("Analyze"):
-            if text_input.strip():
-                sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
-                st.success(f"Sentiment: {sentiment}")
+elif option == "Get tweets on topic":
+    topic = st.text_input("Enter a topic or keyword (e.g. 'India Budget', 'Elon Musk')")
+    if st.button("Fetch Tweets"):
+        if topic.strip():
+            tweets = fetch_topic_tweets(topic)
+            if tweets:
+                for tweet in tweets:
+                    tweet_text = tweet["text"]
+                    sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)
+                    card_html = create_card(tweet_text, sentiment)
+                    st.markdown(card_html, unsafe_allow_html=True)
             else:
-                st.warning("Please enter some text.")
-
-    elif option == "Get tweets from user":
-        username = st.text_input("Enter Twitter username (without @)")
-        if st.button("Fetch Tweets"):
-            if username.strip():
-                tweets = fetch_user_tweets(username)
-                if tweets:
-                    for tweet in tweets:
-                        tweet_text = tweet["text"]
-                        sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)
-                        card_html = create_card(tweet_text, sentiment)
-                        st.markdown(card_html, unsafe_allow_html=True)
-                else:
-                    st.info("No tweets found or user is private.")
-            else:
-                st.warning("Please enter a Twitter username.")
-
-if __name__ == "__main__":
-    main()
+                st.info("No tweets found or an error occurred.")
+        else:
+            st.warning("Please enter a topic or keyword.")
