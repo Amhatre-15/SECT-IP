@@ -23,7 +23,7 @@ def download_and_load_csv():
     url = "https://drive.google.com/uc?id=1SekoMdcYy8gpcF7Al8IaKGfkVNHSXSun"
     output = "tweets_data.csv"
     gdown.download(url, output, quiet=False)
-    return pd.read_csv(output, encoding="ISO-8859-1")  # or 'latin1'
+    return pd.read_csv(output, encoding="ISO-8859-1")  # handles Unicode error
 
 # Preprocessing + Prediction
 def predict_sentiment(text, model, vectorizer, stop_words):
@@ -52,17 +52,27 @@ def main():
         st.info("Fetching dataset from Google Drive (only once)...")
         df = download_and_load_csv()
 
-        query = st.text_input("Enter keyword to search tweets (e.g., India, tech, movie):")
-        max_results = st.slider("Number of tweets to analyze", 1, 50, 10)
+        st.write("Available columns in dataset:", df.columns.tolist())  # DEBUG: show column names
 
-        if st.button("Search and Analyze"):
-            matched = df[df['text'].str.contains(query, case=False, na=False)]
-            if not matched.empty:
-                for i, row in matched.head(max_results).iterrows():
-                    sentiment = predict_sentiment(row['text'], model, vectorizer, stop_words)
-                    st.markdown(f"**{sentiment}**: {row['text']}")
-            else:
-                st.warning("No matching tweets found.")
+        # Try to detect the correct column
+        possible_text_cols = [col for col in df.columns if 'text' in col.lower() or 'tweet' in col.lower()]
+        if possible_text_cols:
+            col_name = possible_text_cols[0]
+            st.success(f"Using column: {col_name} for tweet analysis")
+
+            query = st.text_input("Enter keyword to search tweets (e.g., India, tech, movie):")
+            max_results = st.slider("Number of tweets to analyze", 1, 50, 10)
+
+            if st.button("Search and Analyze"):
+                matched = df[df[col_name].astype(str).str.contains(query, case=False, na=False)]
+                if not matched.empty:
+                    for i, row in matched.head(max_results).iterrows():
+                        sentiment = predict_sentiment(row[col_name], model, vectorizer, stop_words)
+                        st.markdown(f"**{sentiment}**: {row[col_name]}")
+                else:
+                    st.warning("No matching tweets found.")
+        else:
+            st.error("❌ Could not find a suitable 'text' or 'tweet' column in your dataset.")
 
 if __name__ == "__main__":
     main()
