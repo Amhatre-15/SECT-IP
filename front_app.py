@@ -1,70 +1,72 @@
 import streamlit as st
 import pandas as pd
-import gdown
-import matplotlib.pyplot as plt
-from nltk.sentiment import SentimentIntensityAnalyzer
 import nltk
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import make_pipeline
+import re
 
-# Download NLTK data
-nltk.download('vader_lexicon')
+nltk.download('stopwords')
+from nltk.corpus import stopwords
 
-# Cache the data loading process
+stop_words = set(stopwords.words('english'))
+
+# Load CSV from GitHub
 @st.cache_data
-def download_and_load_csv():
-    url = "https://drive.google.com/uc?id=1Xe7bGaxm9qxMxHiUMh03QhDwIWyBNIEg"
-    output = "sentiment_data.csv"
-    gdown.download(url, output, quiet=False)
-
-    # Use correct encoding and assign proper column names
-    column_names = ['target', 'ids', 'date', 'flag', 'user', 'text']
-    df = pd.read_csv(output, encoding='ISO-8859-1', header=None, names=column_names)
+def load_data():
+    url = "https://raw.githubusercontent.com/Amhatre-15/SECT-IP/main/data/sentiment_dataset.csv"
+    df = pd.read_csv(url, encoding='ISO-8859-1', header=None,
+                     names=['target', 'ids', 'date', 'flag', 'user', 'text'])
     return df
 
-def analyze_sentiment(text):
-    sia = SentimentIntensityAnalyzer()
-    score = sia.polarity_scores(text)
-    compound = score['compound']
-    if compound >= 0.05:
-        return 'Positive'
-    elif compound <= -0.05:
-        return 'Negative'
-    else:
-        return 'Neutral'
+# Preprocess the text
+def clean_text(text):
+    text = re.sub(r"http\S+", "", text)           # remove URLs
+    text = re.sub(r"@\w+", "", text)              # remove mentions
+    text = re.sub(r"#\w+", "", text)              # remove hashtags
+    text = re.sub(r"[^A-Za-z\s]", "", text)       # remove punctuation
+    text = text.lower()                           # to lowercase
+    text = " ".join([word for word in text.split() if word not in stop_words])  # remove stopwords
+    return text
 
 def main():
-    st.title("Twitter Sentiment Analysis")
-    st.write("### Choose Option")
-    st.write("**Search Tweets by Topic**")
+    st.title("Twitter Sentiment Analysis (Offline CSV)")
+    st.write("Choose Option")
 
-    # Get input
-    query = st.text_input("Enter topic/keyword (e.g., Modi, Olympics, AI):")
+    option = st.radio("Select an action", ["Search Tweets by Topic"])
+    
+    df = load_data()
+    df['cleaned_text'] = df['text'].astype(str).apply(clean_text)
 
-    if query:
-        df = download_and_load_csv()
+    if option == "Search Tweets by Topic":
+        query = st.text_input("Enter topic/keyword (e.g., Modi, Olympics, AI):")
 
-        # Show available columns for debugging
-        st.write("✅ Columns in dataset:", df.columns.tolist())
+        if query:
+            matched = df[df['cleaned_text'].str.contains(query, case=False, na=False)]
 
-        # Filter relevant tweets
-        matched = df[df['text'].str.contains(query, case=False, na=False)]
+            if matched.empty:
+                st.warning("No tweets matched your query.")
+                return
 
-        if matched.empty:
-            st.warning("❌ No matching tweets found for the topic.")
-            return
+            st.subheader(f"Showing results for '{query}'")
+            st.dataframe(matched[['text']].head(10))
 
-        # Apply sentiment analysis
-        matched['Sentiment'] = matched['text'].apply(analyze_sentiment)
+            # Basic sentiment prediction
+            model = make_pipeline(CountVectorizer(), MultinomialNB())
+            model.fit(df['cleaned_text'], df['target'])
 
-        # Display results
-        st.write(f"### Showing {len(matched)} matching tweets for: `{query}`")
-        st.dataframe(matched[['text', 'Sentiment']].head(20))
+            predictions = model.predict(matched['cleaned_text'])
+            matched['predicted_sentiment'] = predictions
 
-        # Plot sentiment distribution
-        sentiment_counts = matched['Sentiment'].value_counts()
-        st.write("### Sentiment Distribution")
-        fig, ax = plt.subplots()
-        sentiment_counts.plot(kind='bar', ax=ax, color=['green', 'red', 'gray'])
-        st.pyplot(fig)
+            sentiment_map = {0: 'Negative', 4: 'Positive'}
+            matched['predicted_sentiment'] = matched['predicted_sentiment'].map(sentiment_map)
+
+            st.subheader("Sentiment Distribution")
+            fig, ax = plt.subplots()
+            sns.countplot(data=matched, x='predicted_sentiment', ax=ax)
+            st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
