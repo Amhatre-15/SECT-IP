@@ -1,5 +1,6 @@
 import streamlit as st
-import requests
+import pandas as pd
+import gdown
 import re
 import pickle
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -17,6 +18,13 @@ def load_stopwords():
     nltk.download("stopwords")
     return stopwords.words("english")
 
+@st.cache_data
+def download_and_load_csv():
+    url = "https://drive.google.com/uc?id=1SekoMdcYy8gpcF7Al8IaKGfkVNHSXSun"
+    output = "tweets_data.csv"
+    gdown.download(url, output, quiet=False)
+    return pd.read_csv(output)
+
 # Preprocessing + Prediction
 def predict_sentiment(text, model, vectorizer, stop_words):
     text = re.sub(r"[^a-zA-Z]", " ", text).lower()
@@ -25,46 +33,33 @@ def predict_sentiment(text, model, vectorizer, stop_words):
     prediction = model.predict(vec)
     return "Positive" if prediction == 1 else "Negative"
 
-# Twitter API Request
-def fetch_tweets(query, bearer_token, count=5):
-    url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&max_results={count}&tweet.fields=text"
-    headers = {
-        "Authorization": f"Bearer {bearer_token}"
-    }
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        return [tweet['text'] for tweet in response.json().get("data", [])]
-    else:
-        st.error(f"Error fetching tweets: {response.status_code}")
-        return []
-
 # Streamlit UI
 def main():
-    st.title("Twitter Sentiment Analysis")
+    st.title("Offline Twitter Sentiment Analysis")
 
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
 
-    option = st.selectbox("Choose Option", ["Input Text", "Search Tweets by Topic"])
-    
+    option = st.selectbox("Choose Option", ["Input Text", "Analyze From Dataset"])
+
     if option == "Input Text":
         text = st.text_area("Enter your text:")
         if st.button("Analyze"):
             sentiment = predict_sentiment(text, model, vectorizer, stop_words)
             st.success(f"Sentiment: {sentiment}")
-
     else:
-        query = st.text_input("Enter topic/keyword (e.g., Modi, Olympics, AI):")
-        bearer_token = st.text_input("Enter your Twitter API Bearer Token", type="password")
-        if st.button("Fetch Tweets"):
-            tweets = fetch_tweets(query, bearer_token)
-            if tweets:
-                for tweet in tweets:
-                    sentiment = predict_sentiment(tweet, model, vectorizer, stop_words)
-                    st.markdown(f"**{sentiment}**: {tweet}")
+        st.info("Fetching dataset from Google Drive (may take a few seconds)...")
+        df = download_and_load_csv()
+
+        query = st.text_input("Enter keyword to search tweets (e.g., India, tech, movie):")
+        if st.button("Search and Analyze"):
+            matched = df[df['text'].str.contains(query, case=False, na=False)]
+            if not matched.empty:
+                for i, row in matched.head(10).iterrows():  # Limit to first 10 for speed
+                    sentiment = predict_sentiment(row['text'], model, vectorizer, stop_words)
+                    st.markdown(f"**{sentiment}**: {row['text']}")
             else:
-                st.warning("No tweets found or an error occurred.")
+                st.warning("No matching tweets found.")
 
 if __name__ == "__main__":
     main()
