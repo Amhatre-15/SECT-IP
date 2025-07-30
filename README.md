@@ -33,4 +33,4 @@ This web-based dashboard allows users to:
 | Phase 2      | Sentiment Analysis with VADER          | ✅ Completed |
 | Phase 3      | Data Visualization (bar/pie charts)    | ✅ Completed  |
 | Phase 4      | Streamlit Dashboard UI                 | ✅ Completed  |
-| Phase 5      | Testing, Polish & Deployment           | ⏳ Upcoming  |
+| Phase 5      | Testing, Polish & Deployment           | ✅ Completed  |
