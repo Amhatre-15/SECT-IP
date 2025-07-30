@@ -2,17 +2,31 @@ import streamlit as st
 import pickle
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
-import nltk
 from ntscraper import Nitter
 
-# Download stopwords once, using Streamlit's caching
+# Load stopwords locally (no download needed)
 @st.cache_resource
 def load_stopwords():
-    nltk.download('stopwords')
-    return stopwords.words('english')
+    return set([
+        'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
+        'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him',
+        'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its',
+        'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what',
+        'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'am',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has',
+        'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the',
+        'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of',
+        'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into',
+        'through', 'during', 'before', 'after', 'above', 'below', 'to',
+        'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under',
+        'again', 'further', 'then', 'once', 'here', 'there', 'when',
+        'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more',
+        'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+        'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will',
+        'just', 'don', 'should', 'now'
+    ])
 
-# Load model and vectorizer once
+# Load model and vectorizer
 @st.cache_resource
 def load_model_and_vectorizer():
     with open('model.pkl', 'rb') as model_file:
@@ -23,7 +37,6 @@ def load_model_and_vectorizer():
 
 # Define sentiment prediction function
 def predict_sentiment(text, model, vectorizer, stop_words):
-    # Preprocess text
     text = re.sub('[^a-zA-Z]', ' ', text)
     text = text.lower()
     text = text.split()
@@ -31,8 +44,6 @@ def predict_sentiment(text, model, vectorizer, stop_words):
     text = ' '.join(text)
     text = [text]
     text = vectorizer.transform(text)
-    
-    # Predict sentiment
     sentiment = model.predict(text)
     return "Negative" if sentiment == 0 else "Positive"
 
@@ -56,34 +67,36 @@ def create_card(tweet_text, sentiment):
 def main():
     st.title("Twitter Sentiment Analysis")
 
-    # Load stopwords, model, vectorizer, and scraper only once
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
     scraper = initialize_scraper()
 
-    # User input: either text input or Twitter username
     option = st.selectbox("Choose an option", ["Input text", "Get tweets from user"])
     
     if option == "Input text":
         text_input = st.text_area("Enter text to analyze sentiment")
         if st.button("Analyze"):
-            sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
-            st.write(f"Sentiment: {sentiment}")
+            if text_input.strip():
+                sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
+                st.write(f"Sentiment: {sentiment}")
+            else:
+                st.warning("Please enter some text.")
 
     elif option == "Get tweets from user":
         username = st.text_input("Enter Twitter username")
         if st.button("Fetch Tweets"):
-            tweets_data = scraper.get_tweets(username, mode='user', number=5)
-            if 'tweets' in tweets_data:  # Check if the 'tweets' key exists
-                for tweet in tweets_data['tweets']:
-                    tweet_text = tweet['text']  # Access the text of the tweet
-                    sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)  # Predict sentiment of the tweet text
-                    
-                    # Create and display the colored card for the tweet
-                    card_html = create_card(tweet_text, sentiment)
-                    st.markdown(card_html, unsafe_allow_html=True)
+            if username.strip():
+                tweets_data = scraper.get_tweets(username, mode='user', number=5)
+                if 'tweets' in tweets_data:
+                    for tweet in tweets_data['tweets']:
+                        tweet_text = tweet['text']
+                        sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)
+                        card_html = create_card(tweet_text, sentiment)
+                        st.markdown(card_html, unsafe_allow_html=True)
+                else:
+                    st.write("No tweets found or an error occurred.")
             else:
-                st.write("No tweets found or an error occurred.")
+                st.warning("Please enter a Twitter username.")
 
 if __name__ == "__main__":
     main()
