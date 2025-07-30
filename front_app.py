@@ -1,10 +1,18 @@
 import streamlit as st
 import pickle
 import re
+import requests
+import os
 from sklearn.feature_extraction.text import TfidfVectorizer
-from ntscraper import Nitter
 
-# Load stopwords locally (no download needed)
+# ====== Load Bearer Token Securely ======
+BEARER_TOKEN = st.secrets.get("BEARER_TOKEN", None)
+
+if not BEARER_TOKEN:
+    st.error("Twitter Bearer Token is missing. Add it to Streamlit Secrets.")
+    st.stop()
+
+# ====== Load Stopwords ======
 @st.cache_resource
 def load_stopwords():
     return set([
@@ -26,7 +34,7 @@ def load_stopwords():
         'just', 'don', 'should', 'now'
     ])
 
-# Load model and vectorizer
+# ====== Load Model & Vectorizer ======
 @st.cache_resource
 def load_model_and_vectorizer():
     with open('model.pkl', 'rb') as model_file:
@@ -35,24 +43,34 @@ def load_model_and_vectorizer():
         vectorizer = pickle.load(vectorizer_file)
     return model, vectorizer
 
-# Define sentiment prediction function
+# ====== Predict Sentiment ======
 def predict_sentiment(text, model, vectorizer, stop_words):
     text = re.sub('[^a-zA-Z]', ' ', text)
-    text = text.lower()
-    text = text.split()
+    text = text.lower().split()
     text = [word for word in text if word not in stop_words]
     text = ' '.join(text)
-    text = [text]
-    text = vectorizer.transform(text)
-    sentiment = model.predict(text)
+    text_vector = vectorizer.transform([text])
+    sentiment = model.predict(text_vector)
     return "Negative" if sentiment == 0 else "Positive"
 
-# Initialize Nitter scraper
-@st.cache_resource
-def initialize_scraper():
-    return Nitter(log_level=1)
+# ====== Fetch Tweets using Twitter API ======
+def fetch_user_tweets(username, max_results=5):
+    url = f"https://api.twitter.com/2/tweets/search/recent"
+    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
+    params = {
+        "query": f"from:{username} -is:retweet",
+        "tweet.fields": "created_at",
+        "max_results": max_results
+    }
+    response = requests.get(url, headers=headers, params=params)
 
-# Function to create a colored card
+    if response.status_code == 200:
+        return response.json().get("data", [])
+    else:
+        st.error(f"Error fetching tweets: {response.status_code}")
+        return []
+
+# ====== Display Colored Card ======
 def create_card(tweet_text, sentiment):
     color = "green" if sentiment == "Positive" else "red"
     card_html = f"""
@@ -63,13 +81,12 @@ def create_card(tweet_text, sentiment):
     """
     return card_html
 
-# Main app logic
+# ====== Streamlit App ======
 def main():
     st.title("Twitter Sentiment Analysis")
 
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
-    scraper = initialize_scraper()
 
     option = st.selectbox("Choose an option", ["Input text", "Get tweets from user"])
     
@@ -78,23 +95,23 @@ def main():
         if st.button("Analyze"):
             if text_input.strip():
                 sentiment = predict_sentiment(text_input, model, vectorizer, stop_words)
-                st.write(f"Sentiment: {sentiment}")
+                st.success(f"Sentiment: {sentiment}")
             else:
                 st.warning("Please enter some text.")
 
     elif option == "Get tweets from user":
-        username = st.text_input("Enter Twitter username")
+        username = st.text_input("Enter Twitter username (without @)")
         if st.button("Fetch Tweets"):
             if username.strip():
-                tweets_data = scraper.get_tweets(username, mode='user', number=5)
-                if 'tweets' in tweets_data:
-                    for tweet in tweets_data['tweets']:
-                        tweet_text = tweet['text']
+                tweets = fetch_user_tweets(username)
+                if tweets:
+                    for tweet in tweets:
+                        tweet_text = tweet["text"]
                         sentiment = predict_sentiment(tweet_text, model, vectorizer, stop_words)
                         card_html = create_card(tweet_text, sentiment)
                         st.markdown(card_html, unsafe_allow_html=True)
                 else:
-                    st.write("No tweets found or an error occurred.")
+                    st.info("No tweets found or user is private.")
             else:
                 st.warning("Please enter a Twitter username.")
 
