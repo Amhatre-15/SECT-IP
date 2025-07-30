@@ -1,77 +1,70 @@
 import streamlit as st
 import pandas as pd
 import gdown
-import re
-import pickle
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
+import matplotlib.pyplot as plt
+from nltk.sentiment import SentimentIntensityAnalyzer
 import nltk
 
-# Setup
-@st.cache_resource
-def load_model_and_vectorizer():
-    with open("model.pkl", "rb") as m, open("vectorizer.pkl", "rb") as v:
-        return pickle.load(m), pickle.load(v)
+# Download NLTK data
+nltk.download('vader_lexicon')
 
-@st.cache_resource
-def load_stopwords():
-    nltk.download("stopwords")
-    return stopwords.words("english")
-
+# Cache the data loading process
 @st.cache_data
 def download_and_load_csv():
-    url = "https://drive.google.com/uc?id=1SekoMdcYy8gpcF7Al8IaKGfkVNHSXSun"
-    output = "tweets_data.csv"
+    url = "https://drive.google.com/uc?id=1Xe7bGaxm9qxMxHiUMh03QhDwIWyBNIEg"
+    output = "sentiment_data.csv"
     gdown.download(url, output, quiet=False)
-    
-    # Read with encoding fix
-    df = pd.read_csv(output, encoding="ISO-8859-1", header=None)
-    
-    # Rename columns for easier access
-    df.columns = ["sentiment", "id", "date", "query", "user", "text"]
-    
+
+    # Use correct encoding and assign proper column names
+    column_names = ['target', 'ids', 'date', 'flag', 'user', 'text']
+    df = pd.read_csv(output, encoding='ISO-8859-1', header=None, names=column_names)
     return df
 
-# Preprocessing + Prediction
-def predict_sentiment(text, model, vectorizer, stop_words):
-    text = re.sub(r"[^a-zA-Z]", " ", text).lower()
-    text = ' '.join([word for word in text.split() if word not in stop_words])
-    vec = vectorizer.transform([text])
-    prediction = model.predict(vec)
-    return "Positive" if prediction == 1 else "Negative"
+def analyze_sentiment(text):
+    sia = SentimentIntensityAnalyzer()
+    score = sia.polarity_scores(text)
+    compound = score['compound']
+    if compound >= 0.05:
+        return 'Positive'
+    elif compound <= -0.05:
+        return 'Negative'
+    else:
+        return 'Neutral'
 
-# Streamlit UI
 def main():
-    st.title("Twitter Sentiment Analysis (Offline Dataset)")
+    st.title("Twitter Sentiment Analysis")
+    st.write("### Choose Option")
+    st.write("**Search Tweets by Topic**")
 
-    stop_words = load_stopwords()
-    model, vectorizer = load_model_and_vectorizer()
+    # Get input
+    query = st.text_input("Enter topic/keyword (e.g., Modi, Olympics, AI):")
 
-    option = st.selectbox("Choose Option", ["Input Text", "Search in Offline Dataset"])
-
-    if option == "Input Text":
-        text = st.text_area("Enter your text:")
-        if st.button("Analyze"):
-            sentiment = predict_sentiment(text, model, vectorizer, stop_words)
-            st.success(f"Sentiment: {sentiment}")
-
-    elif option == "Search in Offline Dataset":
-        st.info("Fetching dataset from Google Drive (only once)...")
+    if query:
         df = download_and_load_csv()
 
-        st.write("Available columns:", df.columns.tolist())
+        # Show available columns for debugging
+        st.write("✅ Columns in dataset:", df.columns.tolist())
 
-        query = st.text_input("Enter keyword to search tweets (e.g., India, tech, movie):")
-        max_results = st.slider("Number of tweets to analyze", 1, 50, 10)
+        # Filter relevant tweets
+        matched = df[df['text'].str.contains(query, case=False, na=False)]
 
-        if st.button("Search and Analyze"):
-            matched = df[df['text'].astype(str).str.contains(query, case=False, na=False)]
-            if not matched.empty:
-                for i, row in matched.head(max_results).iterrows():
-                    sentiment = predict_sentiment(row['text'], model, vectorizer, stop_words)
-                    st.markdown(f"**{sentiment}**: {row['text']}")
-            else:
-                st.warning("No matching tweets found.")
+        if matched.empty:
+            st.warning("❌ No matching tweets found for the topic.")
+            return
+
+        # Apply sentiment analysis
+        matched['Sentiment'] = matched['text'].apply(analyze_sentiment)
+
+        # Display results
+        st.write(f"### Showing {len(matched)} matching tweets for: `{query}`")
+        st.dataframe(matched[['text', 'Sentiment']].head(20))
+
+        # Plot sentiment distribution
+        sentiment_counts = matched['Sentiment'].value_counts()
+        st.write("### Sentiment Distribution")
+        fig, ax = plt.subplots()
+        sentiment_counts.plot(kind='bar', ax=ax, color=['green', 'red', 'gray'])
+        st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
