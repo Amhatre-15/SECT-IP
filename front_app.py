@@ -23,7 +23,7 @@ def download_and_load_csv():
     url = "https://drive.google.com/uc?id=1SekoMdcYy8gpcF7Al8IaKGfkVNHSXSun"
     output = "tweets_data.csv"
     gdown.download(url, output, quiet=False)
-    return pd.read_csv(output)
+    return pd.read_csv(output, encoding="ISO-8859-1")  # or 'latin1'
 
 # Preprocessing + Prediction
 def predict_sentiment(text, model, vectorizer, stop_words):
