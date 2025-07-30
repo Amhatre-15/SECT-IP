@@ -1,72 +1,40 @@
 import streamlit as st
-import pandas as pd
-import nltk
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import make_pipeline
+import pickle
 import re
 
-nltk.download('stopwords')
-from nltk.corpus import stopwords
+# Load the trained model
+with open("model.pkl", "rb") as file:
+    model = pickle.load(file)
 
-stop_words = set(stopwords.words('english'))
+# Load the vectorizer (Tfidf or CountVectorizer)
+with open("vectorizer.pkl", "rb") as file:
+    vectorizer = pickle.load(file)
 
-# Load CSV from GitHub
-@st.cache_data
-def load_data():
-    url = "https://raw.githubusercontent.com/Amhatre-15/SECT-IP/main/data/sentiment_dataset.csv"
-    df = pd.read_csv(url, encoding='ISO-8859-1', header=None,
-                     names=['target', 'ids', 'date', 'flag', 'user', 'text'])
-    return df
-
-# Preprocess the text
+# Function to clean the user input
 def clean_text(text):
-    text = re.sub(r"http\S+", "", text)           # remove URLs
-    text = re.sub(r"@\w+", "", text)              # remove mentions
-    text = re.sub(r"#\w+", "", text)              # remove hashtags
-    text = re.sub(r"[^A-Za-z\s]", "", text)       # remove punctuation
-    text = text.lower()                           # to lowercase
-    text = " ".join([word for word in text.split() if word not in stop_words])  # remove stopwords
+    text = re.sub(r"http\S+|www\S+|https\S+", '', text, flags=re.MULTILINE)  # remove URLs
+    text = re.sub(r'\@w+|\#','', text)  # remove mentions and hashtags
+    text = re.sub(r"[^a-zA-Z\s]", '', text)  # remove special characters
+    text = text.lower()
     return text
 
-def main():
-    st.title("Twitter Sentiment Analysis (Offline CSV)")
-    st.write("Choose Option")
+# Streamlit app layout
+st.set_page_config(page_title="Twitter Sentiment Analysis", layout="centered")
+st.title("📊 Twitter Sentiment Analysis")
+st.markdown("Enter a tweet or sentence below to analyze its **sentiment** based on a pre-trained model.")
 
-    option = st.radio("Select an action", ["Search Tweets by Topic"])
-    
-    df = load_data()
-    df['cleaned_text'] = df['text'].astype(str).apply(clean_text)
+# Input box
+user_input = st.text_input("🔍 Enter text here:")
 
-    if option == "Search Tweets by Topic":
-        query = st.text_input("Enter topic/keyword (e.g., Modi, Olympics, AI):")
+# Prediction
+if user_input:
+    cleaned = clean_text(user_input)
+    vectorized_input = vectorizer.transform([cleaned])
+    prediction = model.predict(vectorized_input)[0]
 
-        if query:
-            matched = df[df['cleaned_text'].str.contains(query, case=False, na=False)]
-
-            if matched.empty:
-                st.warning("No tweets matched your query.")
-                return
-
-            st.subheader(f"Showing results for '{query}'")
-            st.dataframe(matched[['text']].head(10))
-
-            # Basic sentiment prediction
-            model = make_pipeline(CountVectorizer(), MultinomialNB())
-            model.fit(df['cleaned_text'], df['target'])
-
-            predictions = model.predict(matched['cleaned_text'])
-            matched['predicted_sentiment'] = predictions
-
-            sentiment_map = {0: 'Negative', 4: 'Positive'}
-            matched['predicted_sentiment'] = matched['predicted_sentiment'].map(sentiment_map)
-
-            st.subheader("Sentiment Distribution")
-            fig, ax = plt.subplots()
-            sns.countplot(data=matched, x='predicted_sentiment', ax=ax)
-            st.pyplot(fig)
-
-if __name__ == "__main__":
-    main()
+    if prediction == 0:
+        st.error("☹️ Negative Sentiment")
+    elif prediction == 4:
+        st.success("😊 Positive Sentiment")
+    else:
+        st.warning("😐 Neutral/Unknown Sentiment")
