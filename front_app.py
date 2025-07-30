@@ -35,27 +35,30 @@ def predict_sentiment(text, model, vectorizer, stop_words):
 
 # Streamlit UI
 def main():
-    st.title("Offline Twitter Sentiment Analysis")
+    st.title("Twitter Sentiment Analysis (Offline Dataset)")
 
     stop_words = load_stopwords()
     model, vectorizer = load_model_and_vectorizer()
 
-    option = st.selectbox("Choose Option", ["Input Text", "Analyze From Dataset"])
+    option = st.selectbox("Choose Option", ["Input Text", "Search in Offline Dataset"])
 
     if option == "Input Text":
         text = st.text_area("Enter your text:")
         if st.button("Analyze"):
             sentiment = predict_sentiment(text, model, vectorizer, stop_words)
             st.success(f"Sentiment: {sentiment}")
-    else:
-        st.info("Fetching dataset from Google Drive (may take a few seconds)...")
+
+    elif option == "Search in Offline Dataset":
+        st.info("Fetching dataset from Google Drive (only once)...")
         df = download_and_load_csv()
 
         query = st.text_input("Enter keyword to search tweets (e.g., India, tech, movie):")
+        max_results = st.slider("Number of tweets to analyze", 1, 50, 10)
+
         if st.button("Search and Analyze"):
             matched = df[df['text'].str.contains(query, case=False, na=False)]
             if not matched.empty:
-                for i, row in matched.head(10).iterrows():  # Limit to first 10 for speed
+                for i, row in matched.head(max_results).iterrows():
                     sentiment = predict_sentiment(row['text'], model, vectorizer, stop_words)
                     st.markdown(f"**{sentiment}**: {row['text']}")
             else:
